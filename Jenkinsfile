@@ -1,75 +1,48 @@
 pipeline {
-    agent {
-        docker {
-            image 'ubuntu:latest'
-        }
-    }
+    agent any
 
     parameters {
-        string(name: 'IMG_TAG', defaultValue: 'latest', description: 'Add a tag for your Image')
+        string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Add tag for your image')
+        string(name: 'IMAGE_NAME', defaultValue: 'simple_image_name', description: 'Add image name for your docker image')
     }
 
     environment {
-        IMG  = 'my_python_app'
-        REPO = 'cmuriukin/class_24_repository'
+        REPO = 'chandra237/class_28_repo'
     }
 
     stages {
-        stage('Checkout Git Project') {
+        stage('Checkout Git Repository') {
             steps {
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: "*/${env.BRANCH_NAME}"]],
-                    userRemoteConfigs: [[url: 'https://github.com/cmuriukin/my-simple-python-application.git']]
-                ])
+                git branch: 'feature-class_28', url: 'https://github.com/cwule06/my-simple-python-application.git'
             }
         }
 
-        stage('Docker Build Image') {
+        stage('Build Docker Image') {
             steps {
-                sh 'docker build -t $IMG:$IMG_TAG .'
+                sh 'docker build -t $IMAGE_NAME:$IMAGE_TAG .'
             }
         }
 
         stage('Scan Docker Image') {
             steps {
-                script {
-                    def scanStatus = sh(
-                        script: 'trivy image --exit-code 1 --severity CRITICAL $IMG:$IMG_TAG',
-                        returnStatus: true
-                    )
-
-                    if (scanStatus != 0) {
-                        slackSend (
-                            color: 'warning',
-                            message: "Docker Build ${BUILD_NUMBER} on branch ${env.BRANCH_NAME} found CRITICAL vulnerability",
-                            channel: '#class_24_docker_project',
-                            tokenCredentialId: 'slack_channel'
-                        )
-                    }
-                }
+                sh 'trivy image $IMAGE_NAME:$IMAGE_TAG'
+                //sh 'trivy image --exit-code 1 --severity CRITICAL,HIGH $IMAGE_NAME:$IMAGE_TAG'
             }
         }
 
         stage('Tag Docker Image') {
             steps {
-                sh 'docker tag $IMG:$IMG_TAG $REPO:$IMG_TAG'
-                sh 'docker tag $IMG:$IMG_TAG $REPO:$BUILD_NUMBER'
-                sh 'docker tag $IMG:$IMG_TAG $REPO:${env.BRANCH_NAME}-${BUILD_NUMBER}'
+                sh 'docker tag $IMAGE_NAME:$IMAGE_TAG $REPO:$IMAGE_TAG'
+                sh 'docker tag $IMAGE_NAME:$IMAGE_TAG $REPO:$BUILD_NUMBER'
             }
         }
 
-        stage('Push Docker Image to Docker Hub') {
+        stage('Docker push Image dockerhub') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'docker_credential',
-                    passwordVariable: 'DOCKERHUB_PASSWORD',
-                    usernameVariable: 'DOCKER_USERNAME'
-                )]) {
-                    sh "echo $DOCKERHUB_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin"
-                    sh 'docker push $REPO:$IMG_TAG'
+                withCredentials([usernamePassword(credentialsId: 'Jenkins_PAT', passwordVariable: 'DOCKER_HUB_PASSWORD', usernameVariable: 'DOCKER_HUB_USER')]) {
+                    sh 'echo $DOCKER_HUB_PASSWORD | docker login -u $DOCKER_HUB_USER --password-stdin'
+                    sh 'docker push $REPO:$IMAGE_TAG'
                     sh 'docker push $REPO:$BUILD_NUMBER'
-                    sh 'docker push $REPO:${env.BRANCH_NAME}-${BUILD_NUMBER}'
                 }
             }
         }
@@ -77,20 +50,19 @@ pipeline {
 
     post {
         success {
-            slackSend (
+            slackSend channel: '#all-devops-class',
                 color: 'good',
-                message: "✅ Docker Build ${BUILD_NUMBER} on branch ${env.BRANCH_NAME} completed successfully",
-                channel: '#class_24_docker_project',
-                tokenCredentialId: 'slack_channel'
-            )
+                message: "Docker build Id $BUILD_NUMBER was built and published Successfully",
+                tokenCredentialId: 'class_28_slack_jenkins_cred'
         }
         failure {
-            slackSend (
+            slackSend channel: '#all-devops-class',
                 color: 'danger',
-                message: "❌ Docker Build ${BUILD_NUMBER} on branch ${env.BRANCH_NAME} failed",
-                channel: '#class_24_docker_project',
-                tokenCredentialId: 'slack_channel'
-            )
+                message: "Docker pipeline failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                tokenCredentialId: 'class_28_slack_jenkins_cred'
+        }
+        always {
+            sh 'docker logout || true'
         }
     }
 }
